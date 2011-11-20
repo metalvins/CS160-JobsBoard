@@ -1,0 +1,147 @@
+<?php
+
+/**
+ * @file
+ * Tracks publish times on nodes.
+ *
+ * This file implements the logic that updates the database every time a 
+ * create or update event happens on a job per template node.
+ *
+ * It also allows lifetime fields to be used in the views module.
+ *
+ * Finally, it calculates aggregate data over time spans in its 
+ * aggregate_compute function.
+ *
+ */
+
+/**
+ * Impelements hook_node_update()
+ *
+ * When a node updates, we check if its status has changed and update the 
+ * lifetime statistics accordingly. No record will exist if it is a new node, 
+ * so a table entry will be created.
+ */
+function lifetime_node_update($node) {
+    // Get records for selected node.
+    $old_record = db_query('SELECT * FROM {node_lifetime} WHERE nid =
+	:nid', array(':nid' => $node->nid));
+    $node_states = db_query('SELECT * FROM {field_data_field_job_workflow_state}
+        WHERE entity_id = :nid', array(':nid' => $node->nid));
+
+    foreach ($node_states as $nstate) {
+	$nstatus = ($nstate->field_job_workflow_state_value == 'published') ? 1 : 0;
+    /* watchdog("lifetime", "Lifetime node id " . $node->nid . " has status " 
+     * . $nstatus);
+     */
+    }
+
+    /* If no record exists and the node is set active, add a record for it. */
+    if ($old_record->rowCount() == 0) { // No record
+	if ($nstatus == 1) { // Becoming Active for the first time.
+	    db_insert('node_lifetime')
+		->fields(array(
+		    'nid' => $node->nid,
+		    'status' => 1,
+		    'lastpubtime' => REQUEST_TIME,
+		    'numpubs' => 0,
+		    'avglifetime' => 0,
+		))
+		->execute();
+	}
+    /* If a record exists and the node's status is changing from what we have 
+	recorded, update accordingly:
+	Unpublished -> calculate new average lifetime, increment numpubs, update status
+	Published -> set last published time to now, update status
+    */
+    } else { // Record exists
+	foreach ($old_record as $pub) {
+	    if ($pub->status != $nstatus) { // Status has changed
+		//watchdog("node_lifetime", "Status doesn't match");
+		if ($nstatus == 0) { // Has been unpublished
+		    db_update('node_lifetime')
+			->fields(array(
+			    'avglifetime' => ($pub->numpubs * $pub->avglifetime +
+				(REQUEST_TIME - $pub->lastpubtime)) 
+				/ ($pub->numpubs + 1),
+			    'numpubs' => $pub->numpubs + 1,
+			    'status' => 0,
+			))
+			->condition('nid', $node->nid, '=')
+			->execute();
+		} else { // Make Active
+			db_update('node_lifetime')
+			    ->fields(array(
+				'status' => 1,
+				'lastpubtime' => REQUEST_TIME,
+			    ))
+			    ->condition('nid', $node->nid, '=')
+			    ->execute();
+		}
+	    }
+	}
+    }
+}
+
+/**
+ * Implements hook_node_insert().
+ *
+ * This should act the same as lifetime_node_update() so it delegates to that 
+ * function.
+ */
+function lifetime_node_insert($node) {
+    lifetime_node_update($node);
+}
+
+/**
+ * Implements hook_views_api().
+ *
+ * This is what allows average lifetime to be visible in any views (which we 
+ * use for job tables.)
+ */
+function lifetime_views_api() {
+    return array(
+	'api' => 2,
+	'path' => drupal_get_path('module', 'lifetime') . '/views',
+    );
+}
+
+/**
+ * Computes aggregate statistics for job lifetimes.
+ *
+ * @param timerange - the length of time in seconds before current that we are 
+ * considering. If 0, consider all time.
+ */
+function lifetime_compute_aggregate($timerange = 0) {
+    $total = 0;
+    $count = 0;
+
+    // If input is zero, we grab statistics for all time.
+    if ($timerange == 0) {
+	$job_records = db_query('SELECT * FROM {node_lifetime, node} WHERE node_lifetime.nid = node.nid AND node.type=:type',
+	    array(':type' => 'job_per_template')
+	);
+    // Otherwise, we grab statistics for last $timerange seconds
+    } else {
+	$job_time_limit = REQUEST_TIME - $timerange;
+	$job_records = db_query('SELECT * FROM {node_lifetime, node} WHERE node_lifetime.nid = node.nid AND node.type=:type AND node.changed > :limit',
+	    array(':type' => 'job_per_template', ':limit' => $job_time_limit)
+	);
+    }
+
+    // Sums all job lifetimes weighted by their number of publish/unpublish 
+    // requests.
+    foreach ($job_records as $job) {
+        $total = $total + $job->avglifetime * $job->numpubs;
+        $count = $count + $job->numpubs;
+    }
+
+    // Divides by total count to get the average.
+    if ($count == 0) {
+	$avg = 0;
+    } else {
+	$avg = $total / $count;
+    }
+
+    return $avg;
+}
+

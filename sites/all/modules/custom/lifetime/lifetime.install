@@ -1,0 +1,59 @@
+<?php
+
+/**
+ * Implements hook_schema()
+ * 
+ * This creates the database table used to track lifetime statistics.
+ * No other installation is needed for this module.
+ * nid - node ID, foreign key
+ * status - published/unpublished as 1/0
+ * lastpubtime - timestamp of the last time node was set to published.
+ * numpubs - the number of publish/unpublish lifecycles the node has 
+ * completed.
+ * avglifetime - the running average of the span of publish/unpublish 
+ * lifecycles.
+ */
+function lifetime_schema() {
+    $schema['node_lifetime'] = array(
+	'description' => 'The table for averaging publishing lifetime.',
+	'fields' => array(
+	    'nid' => array(
+		'description' => 'The node identifier for this lifetime.',
+		'type' => 'int',
+		'not null' => TRUE,
+		'default' => 0,
+	    ),
+	    'status' => array(
+		'description' => 'Current status published/unpublished of the job.',
+		'type' => 'int',
+		'size' => 'tiny',
+		'not null' => TRUE,
+		'default' => 1,
+	    ),
+	    'lastpubtime' => array(
+		'description' => 'The Unix timestamp of last time the node was set to published.',
+		'type' => 'int',
+		'not null' => TRUE,
+		'default' => 0,
+	    ),
+	    'numpubs' => array(
+		'description' => 'The number of times the node has been set to published.',
+		'type' => 'int',
+		'not null' => TRUE,
+		'default' => 0,
+	    ),
+	    'avglifetime' => array(
+		'description' => 'The average lifetime of this node.',
+		'type' => 'int',
+		'not null' => TRUE,
+		'default' => 0,
+	    ),
+	),
+	'foreign keys' => array(
+	    'nid' => array('node' => 'nid'),
+	),
+    );
+
+
+    return $schema;
+}

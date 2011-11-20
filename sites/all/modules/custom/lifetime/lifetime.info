@@ -1,0 +1,9 @@
+name = Lifetime
+description = "Keeps lifetime (publish/unpublish) statistics on eRecruiter job
+nodes."
+package = CS160
+core = 7.x
+files[] = lifetime.module
+files[] = lifetime.install
+files[] = views/lifetime.views.inc
+configure = admin/configure/content/lifetime/settings
